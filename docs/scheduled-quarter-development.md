@@ -49,14 +49,18 @@ per-battery limits. A 10-second response allowance reduces the quarter budget.
   upstream. No do-no-harm guardrail regressions; aggregate metrics are almost
   identical (small timing-related differences remain).
 - `npm run check` passes, including generated configuration, TypeScript and
-  matching Python/ESPHome dashboard assets (27.1 KiB gzip).
+  matching Python/ESPHome dashboard assets (27.0 KiB gzip). The generator
+  normalizes Windows CSS line endings before compression for Linux parity.
 - Full Python suite attempted: 1578 passed, 175 skipped before stopping at
   20 failures. All 20 also fail on a separate, unchanged upstream checkout in
   this environment. These include Windows-incompatible shell/signal/network
   tests and two existing saturation assertions; the complete suite is not green.
-- Browser end-to-end test attempted: the real service cannot start on Windows
-  because its existing supervisor uses `signal.SIGUSR1`. The new browser test
-  is included for a Linux runner; a complete browser pass is still required.
+- The 160 targeted tests also pass on the GitHub Linux runner, followed by
+  all 10 tests in `dashboard.spec.ts` against the real simulated CT stack.
+  The earlier local browser attempt was blocked by Windows `signal.SIGUSR1`.
+- The amd64 Docker image builds successfully. An isolated container with
+  networking disabled loads both policies and the Brussels timezone, then
+  starts the service and returns a healthy dashboard health check.
 - ESP32 ESP-IDF firmware compiles successfully with both features, time/sensor
   wiring and the dashboard enabled (`test.energy.esp32-idf.yaml`). The final
   build includes the meter-failure stop path.
@@ -82,12 +86,16 @@ an amd64 container, and smoke-tests it without networking before publishing
 `ghcr.io/croontje/astrameter:quarter-night` plus a full-commit `sha-...` tag.
 The image is a test build, not an upstream release. The workflow never connects
 to or deploys on unRAID. Changes to that server require the owner's separate
-permission. Initial workflow results are still pending.
+permission. The first successful build is
+[run 42509810422](https://github.com/croontje/AstraMeter/actions/runs/42509810422),
+for commit `c34916e8272f2bcb09bbe2296e5c65442e2aa969`. Its published digest is
+`sha256:93f712fbc92c30737544ad4c2d166b7f769ef19628be70b7995cfa33d21e4862`.
+Anonymous registry access to the image has been verified.
 
-Run the full suite and browser tests on Linux, build the container and complete
-a supervised hardware trial before calling this production ready. The local
-machine has no Docker engine. No live installation was altered to obtain test
-results.
+The full upstream suite, remaining host component suites and a supervised
+hardware trial remain release checks. The Linux dashboard tests and container
+build/start checks above are complete. No live installation was altered to
+obtain test results.
 
 Quarter telemetry is currently supported by the Python HomeWizard v1 JSON HTTP
 adapter with `$.active_power_w`. Other sources use instantaneous fallback;
