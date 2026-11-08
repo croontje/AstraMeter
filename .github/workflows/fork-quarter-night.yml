@@ -47,10 +47,24 @@ jobs:
           tests/test_ct_settings_wiring.py
           tests/test_addon_golden_settings.py
       - name: Check dashboard and configuration generator
+        id: web
         working-directory: web
         run: |
           npm ci
           npm run check
+      - name: Generate Linux dashboard artifacts for drift diagnosis
+        if: failure() && steps.web.outcome == 'failure'
+        working-directory: web
+        run: npm run build:dashboard
+      - name: Keep Linux dashboard artifacts on failure
+        if: failure() && steps.web.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: quarter-night-linux-dashboard
+          path: |
+            src/astrameter/static/dashboard.html
+            esphome/components/ct002/dashboard_asset.h
+          retention-days: 7
       - name: Install test browser
         working-directory: web
         run: npx playwright install --with-deps chromium
