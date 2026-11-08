@@ -33,6 +33,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
 from esphome.components import esp32_ble, http_request, sensor, web_server_base
+from esphome.components import time as time_component
 from esphome.components.esp32 import get_esp32_variant
 from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 from esphome.const import (
@@ -1133,6 +1134,30 @@ def _astrameter_git_commit() -> str:
     return ""
 
 
+def _validate_energy_policy(config):
+    if (
+        config.get("night_charge") or config.get("quarter_shaving")
+    ) and "energy_time_id" not in config:
+        raise cv.Invalid("night_charge/quarter_shaving requires energy_time_id")
+    if config.get("quarter_shaving") and not all(
+        k in config for k in ("quarter_sensor", "import_energy_sensor")
+    ):
+        raise cv.Invalid(
+            "quarter_shaving requires quarter_sensor (W = import Wh*4) and import_energy_sensor (kWh)"
+        )
+    return config
+
+
+def _charge_minute(value):
+    import re
+
+    if not isinstance(value, str) or not re.fullmatch(
+        r"(?:[01]\d|2[0-3]):[0-5]\d", value
+    ):
+        raise cv.Invalid("night charge times must use HH:MM")
+    return value
+
+
 CONFIG_SCHEMA = cv.All(
     _resolve_dashboard,
     _resolve_bluetooth,
@@ -1155,6 +1180,16 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_WIFI_RSSI, default=-50): cv.int_range(min=-127, max=0),
             cv.Optional(CONF_UDP_PORT, default=12345): cv.port,
             cv.Optional(CONF_ACTIVE_CONTROL, default=True): cv.boolean,
+            cv.Optional("quarter_shaving", default=False): cv.boolean,
+            cv.Optional("night_charge", default=False): cv.boolean,
+            cv.Optional("night_charge_start", default="00:00"): _charge_minute,
+            cv.Optional("night_charge_end", default="06:00"): _charge_minute,
+            cv.Optional("night_charge_power", default=800.0): cv.float_range(
+                min=0, max=10000
+            ),
+            cv.Optional("energy_time_id"): cv.use_id(time_component.RealTimeClock),
+            cv.Optional("quarter_sensor"): cv.use_id(sensor.Sensor),
+            cv.Optional("import_energy_sensor"): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_PEAKSHAVING_THRESHOLD, default=0.0): cv.float_range(
                 min=0.0, max=10000.0
             ),
@@ -1189,12 +1224,35 @@ CONFIG_SCHEMA = cv.All(
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_three_phase_sensors,
+    _validate_energy_policy,
 )
 
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+    if config["quarter_shaving"] or config["night_charge"]:
+        cg.add_define("USE_CT002_ENERGY_POLICY")
+        energy_clock = await cg.get_variable(config["energy_time_id"])
+
+        def minute(value):
+            hour, minute = map(int, value.split(":"))
+            return hour * 60 + minute
+
+        cg.add(
+            var.set_energy_policy(
+                energy_clock,
+                config["quarter_shaving"],
+                config["night_charge"],
+                minute(config["night_charge_start"]),
+                minute(config["night_charge_end"]),
+                config["night_charge_power"],
+            )
+        )
+        if config["quarter_shaving"]:
+            quarter = await cg.get_variable(config["quarter_sensor"])
+            imported = await cg.get_variable(config["import_energy_sensor"])
+            cg.add(var.set_energy_sensors(quarter, imported))
 
     sensor_l1 = await cg.get_variable(config[CONF_POWER_SENSOR_L1])
     cg.add(var.set_power_sensor_l1(sensor_l1))

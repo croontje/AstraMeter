@@ -462,7 +462,7 @@ function esphomeSensor(state: State): EsphomeSensor {
     const use3 = phases === 3 && (esp.url3 || fromPaths);
     const sensors = (use3 ? ids : ["grid_l1"]).map((id, i) => templateSensor(id) + phaseFilterBlock(i));
     const url = use3 && esp.url3 ? esp.url3(f) : (esp.url1 ? esp.url1(f) : "http://example.com/api");
-    const lambdaBody = fromPaths
+    let lambdaBody = fromPaths
       ? jsonPathLambda(String(f[esp.jsonPathsField!]), use3 ? ids : ["grid_l1"], warnings)
       : use3
         ? typeof esp.lambda3 === "function"
@@ -472,6 +472,11 @@ function esphomeSensor(state: State): EsphomeSensor {
           ? esp.lambda1(f)
           : esp.lambda1;
     const jsonRoot = esp.jsonRoot || "JsonObject root";
+    if (state.ct?.fields?.QUARTER_SHAVING === "True" && meter.type === "json_http") {
+      sensors.push(`${IND}- platform: template\n${IND}${IND}id: quarter_import\n${IND}${IND}unit_of_measurement: W\n${IND}${IND}update_interval: never`);
+      sensors.push(`${IND}- platform: template\n${IND}${IND}id: total_import\n${IND}${IND}unit_of_measurement: kWh\n${IND}${IND}update_interval: never`);
+      lambdaBody += '\n                  id(quarter_import).publish_state(root["active_power_average_w"].is<float>() ? root["active_power_average_w"].as<float>() : NAN);\n                  id(total_import).publish_state(root["total_power_import_kwh"].is<float>() ? root["total_power_import_kwh"].as<float>() : NAN);';
+    }
     const headers: [string, string][] =
       esp.headersField && !isBlank(f[esp.headersField])
         ? String(f[esp.headersField])
@@ -857,6 +862,28 @@ export function generateEsphome(state: State): string {
   if (!isBlank(ctf.PEAKSHAVING_THRESHOLD)) {
     ctLines.push(`${IND}peakshaving_threshold: ${ctf.PEAKSHAVING_THRESHOLD}`);
   }
+  const energyEnabled = ctf.QUARTER_SHAVING === "True" || ctf.NIGHT_CHARGE === "True";
+  for (const key of ["QUARTER_SHAVING", "NIGHT_CHARGE"]) {
+    if (!isBlank(ctf[key])) ctLines.push(`${IND}${key.toLowerCase()}: ${ctf[key] === "True" ? "true" : "false"}`);
+  }
+  for (const key of ["NIGHT_CHARGE_START", "NIGHT_CHARGE_END"]) {
+    if (!isBlank(ctf[key])) ctLines.push(`${IND}${key.toLowerCase()}: ${quoteYaml(String(ctf[key]))}`);
+  }
+  if (!isBlank(ctf.NIGHT_CHARGE_POWER)) ctLines.push(`${IND}night_charge_power: ${ctf.NIGHT_CHARGE_POWER}`);
+  if (energyEnabled) {
+    out.push(`time:\n${IND}- platform: sntp\n${IND}${IND}id: energy_time\n${IND}${IND}timezone: ${quoteYaml(String(ctf.NIGHT_CHARGE_TIMEZONE || "Europe/Brussels"))}`);
+    ctLines.push(`${IND}energy_time_id: energy_time`);
+  }
+  if (ctf.QUARTER_SHAVING === "True") {
+    if (meter.type !== "json_http") throw new Error("Quarter shaving in the ESPHome generator requires a HomeWizard v1 JSON HTTP meter; other firmware sources need quarter_sensor and import_energy_sensor wired manually.");
+    if (String(meter.fields.JSON_PATHS).trim() !== "$.active_power_w" || meter.phases !== 1) {
+      throw new Error("Quarter shaving requires the HomeWizard whole-house path $.active_power_w.");
+    }
+    if (Number(meter.tuning?.POWER_OFFSET || 0) !== 0 || Number(meter.tuning?.POWER_MULTIPLIER || 1) !== 1) {
+      throw new Error("Quarter shaving requires unscaled whole-house power (offset 0, multiplier 1).");
+    }
+    ctLines.push(`${IND}quarter_sensor: quarter_import`, `${IND}import_energy_sensor: total_import`);
+  }
   if (!isBlank(ctf.CONSUMER_TTL)) ctLines.push(`${IND}consumer_ttl: ${ctf.CONSUMER_TTL}s`);
   if (!isBlank(ctf.DEDUPE_TIME_WINDOW)) ctLines.push(`${IND}dedupe_window: ${ctf.DEDUPE_TIME_WINDOW}s`);
 
@@ -1025,6 +1052,12 @@ export function generateHomeAssistant(state: State): string {
   if (ctf.ACTIVE_CONTROL === "True") add("active_control", true);
   else if (ctf.ACTIVE_CONTROL === "False") add("active_control", false);
   add("peakshaving_threshold", ctf.PEAKSHAVING_THRESHOLD);
+  if (!isBlank(ctf.QUARTER_SHAVING)) add("quarter_shaving", ctf.QUARTER_SHAVING === "True");
+  if (!isBlank(ctf.NIGHT_CHARGE)) add("night_charge", ctf.NIGHT_CHARGE === "True");
+  add("night_charge_start", ctf.NIGHT_CHARGE_START);
+  add("night_charge_end", ctf.NIGHT_CHARGE_END);
+  add("night_charge_power", ctf.NIGHT_CHARGE_POWER);
+  add("night_charge_timezone", ctf.NIGHT_CHARGE_TIMEZONE);
   add("min_efficient_power", ctf.MIN_EFFICIENT_POWER);
   add("min_efficient_charge_power", ctf.MIN_EFFICIENT_CHARGE_POWER);
   add("min_efficient_discharge_power", ctf.MIN_EFFICIENT_DISCHARGE_POWER);

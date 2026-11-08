@@ -1,4 +1,8 @@
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrameter.ct002.energy_policy import QuarterReading
 
 from astrameter.powermeter.base import Powermeter
 
@@ -66,6 +70,12 @@ class TransformedPowermeter(PowermeterWrapper):
             self._multipliers_mismatch_warned = False
 
         return result
+
+    def quarter_reading(self) -> "QuarterReading | None":
+        # The counter describes physical import, not an offset/scaled meter.
+        if any(v != 0 for v in self.offsets) or any(v != 1 for v in self.multipliers):
+            return None
+        return super().quarter_reading()
 
     async def get_powermeter_watts(self) -> list[float]:
         values = await self.wrapped_powermeter.get_powermeter_watts()

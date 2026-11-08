@@ -440,6 +440,10 @@ function deviceControls(
       }),
       h("span", null, "Active control"),
     ),
+    device.control?.energy_strategy
+      ? h("span", { class: "muted", "data-testid": "energy-strategy" },
+          `Energy policy: ${device.control.energy_strategy.replace(/_/g, " ").replace("+", " + ")}`)
+      : null,
     // Only offered by a backend that reports the threshold, so an older
     // firmware without the setting does not show a box that cannot write.
     device.control?.peakshaving_threshold_w === undefined

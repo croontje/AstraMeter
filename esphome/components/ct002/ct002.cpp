@@ -173,6 +173,10 @@ void CT002Component::enable_pid(float kp, float ki, float kd, float output_max, 
 }
 
 void CT002Component::setup() {
+#ifdef USE_CT002_ENERGY_POLICY
+  if (quarter_sensor_) quarter_sensor_->add_on_state_callback([this](float) { quarter_seen_ = now_seconds_(); });
+  if (import_sensor_) import_sensor_->add_on_state_callback([this](float) { import_seen_ = now_seconds_(); });
+#endif
   this->num_phases_ = (this->power_sensor_l2_ != nullptr) ? 3 : 1;
 
   auto cache = [this](size_t i, float v) {
@@ -456,6 +460,17 @@ void CT002Component::handle_request_(const uint8_t *data, size_t len,
   if (this->active_control_ && !in_inspection_mode && meter_ok) {
     values = this->compute_smooth_target_(values, consumer_id);
   }
+#ifdef USE_CT002_ENERGY_POLICY
+  if (!meter_ok && active_control_ && peakshaving_threshold_ > 0 && !in_inspection_mode &&
+      (energy_config_.quarter_enabled || energy_config_.night_charge_enabled)) {
+    const auto &consumer = get_consumer_(consumer_id);
+    if (consumer.active && consumer.participates && !consumer.manual_enabled) {
+      values = {0.0f, 0.0f, 0.0f};
+      values[reported_phase == "D" ? 0 : phase_index(reported_phase)] = -static_cast<float>(reported_power);
+      energy_strategy_ = "meter_unavailable_stop";
+    }
+  }
+#endif
   while (values.size() < 3) values.push_back(0.0f);
   values.resize(3);
 
@@ -818,7 +833,7 @@ float CT002Component::probe_output_() const {
   return sum;
 }
 
-std::pair<float, bool> CT002Component::peakshaving_(float total) const {
+std::pair<float, bool> CT002Component::peakshaving_(float total) {
   // Returns the grid total handed to the balancer and whether the steered
   // batteries should each idle at 0 W on their own: demand above zero but not
   // above the threshold, every steered battery within PEAKSHAVING_IDLE_BAND_W
@@ -850,6 +865,31 @@ std::pair<float, bool> CT002Component::peakshaving_(float total) const {
     all_near_zero = all_near_zero && std::fabs(c.power) <= PEAKSHAVING_IDLE_BAND_W;
   }
   const float household_demand = total + steered_power;
+#ifdef USE_CT002_ENERGY_POLICY
+  if (energy_clock_ && (energy_config_.quarter_enabled || energy_config_.night_charge_enabled)) {
+    const auto local = energy_clock_->now();
+    std::optional<int> minute;
+    std::optional<QuarterReading> quarter;
+    const double epoch = local.is_valid() ? local.timestamp : 0.0;
+    if (local.is_valid()) {
+      minute = local.hour*60+local.minute;
+      if (quarter_sensor_ && import_sensor_ && quarter_seen_ >= 0 && import_seen_ >= 0 &&
+          now-quarter_seen_ >= 0 && now-quarter_seen_ <= 3 &&
+          now-import_seen_ >= 0 && now-import_seen_ <= 3) {
+        const double sampled = std::min(quarter_seen_, import_seen_);
+        quarter = quarter_tracker_.feed(quarter_sensor_->state, import_sensor_->state, epoch-(now-sampled), sampled);
+      }
+    }
+    energy_config_.threshold_w = peakshaving_threshold_;
+    const auto decision = decide_energy(energy_config_, total, steered_power, epoch, minute, quarter);
+    if (decision) {
+      energy_strategy_ = decision->quarter_used ? "quarter" : "instantaneous";
+      if (decision->night_window) energy_strategy_ += "+night_charge";
+      return {static_cast<float>(decision->correction_w),
+              decision->battery_target_w == 0 && all_near_zero && any_charging && any_discharging};
+    }
+  }
+#endif
   if (household_demand <= 0.0f) return {total, false};
   const bool hold = household_demand <= this->peakshaving_threshold_ && all_near_zero &&
                     any_charging && any_discharging;

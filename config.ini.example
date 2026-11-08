@@ -113,6 +113,16 @@ THROTTLE_INTERVAL = 0
 ## charges them. 0 disables it (default); 0-10000. Adjustable live from the
 ## dashboard or Home Assistant. Needs ACTIVE_CONTROL.
 # PEAKSHAVING_THRESHOLD = 0
+# Scheduled charging / fixed-quarter import control; both off by default.
+# Set a positive PEAKSHAVING_THRESHOLD, e.g. 2400 W, with ACTIVE_CONTROL=True.
+# Quarter telemetry: JSON_HTTP HomeWizard v1 with JSON_PATHS = $.active_power_w.
+# Unavailable/invalid quarter telemetry falls back to instantaneous limiting.
+# QUARTER_SHAVING = False
+# NIGHT_CHARGE = False
+# NIGHT_CHARGE_START = 00:00
+# NIGHT_CHARGE_END = 06:00
+# NIGHT_CHARGE_POWER = 800
+# NIGHT_CHARGE_TIMEZONE = Europe/Brussels
 
 ## --- Fair distribution (multi-battery balancing) ---
 ## Adjust each battery's target so they share the load evenly.

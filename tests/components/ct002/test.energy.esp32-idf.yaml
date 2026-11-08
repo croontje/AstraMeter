@@ -1,0 +1,34 @@
+packages:
+  base: !include test.dashboard.esp32-idf.yaml
+
+esphome:
+  name: ct002-energy-test
+
+time:
+  - platform: sntp
+    id: energy_time
+    timezone: Europe/Brussels
+
+sensor:
+  - platform: template
+    id: quarter_import
+    unit_of_measurement: W
+    lambda: 'return 0.0f;'
+    update_interval: 1s
+  - platform: template
+    id: total_import
+    unit_of_measurement: kWh
+    lambda: 'return 100.0f;'
+    update_interval: 1s
+
+ct002:
+  id: ct002_main
+  peakshaving_threshold: 2400
+  night_charge: true
+  night_charge_start: '00:00'
+  night_charge_end: '06:00'
+  night_charge_power: 800
+  quarter_shaving: true
+  energy_time_id: energy_time
+  quarter_sensor: quarter_import
+  import_energy_sensor: total_import

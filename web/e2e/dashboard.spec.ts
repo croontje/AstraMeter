@@ -3,6 +3,11 @@ import { BASE_URL, startStack, statusSnapshot, type Stack } from "./stack.js";
 
 let stack: Stack;
 
+test("shows the current energy policy from the controller", async ({ page }) => {
+  await page.goto(BASE_URL);
+  await expect(page.getByTestId("energy-strategy")).toContainText("Energy policy:");
+});
+
 test.beforeAll(async () => {
   stack = await startStack();
 });

@@ -1,9 +1,15 @@
 # The lifecycle and wait hooks are deliberate no-op defaults, not forgotten
 # abstract methods.
 # ruff: noqa: B027
+from __future__ import annotations
+
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrameter.ct002.energy_policy import QuarterReading
 
 
 def as_list(value: str | list[str]) -> list[str]:
@@ -33,6 +39,10 @@ class Powermeter(ABC):
     # Labels the powermeter's diagnostic device in MQTT Insights. Set by the
     # outermost HealthTrackingPowermeter wrapper to the config section name.
     name: str = ""
+
+    def quarter_reading(self) -> QuarterReading | None:
+        """Validated cached meter import; never initiates I/O."""
+        return None
 
     @abstractmethod
     async def get_powermeter_watts(self) -> list[float]: ...

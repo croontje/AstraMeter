@@ -145,6 +145,7 @@ export interface DeviceStatus {
     active_control?: boolean;
     /** Peak shaving threshold in W; 0 means off. */
     peakshaving_threshold_w?: number;
+    energy_strategy?: string;
     consumer_ttl_s?: number;
     dedupe_window_s?: number;
     debug_status?: boolean;

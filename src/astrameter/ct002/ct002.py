@@ -8,6 +8,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from datetime import datetime, timezone
 from typing import Any, Literal, NamedTuple, cast
+from zoneinfo import ZoneInfo
 
 from astrameter.config.logger import debug_traceback, logger
 from astrameter.power_units import three_phases
@@ -29,6 +30,7 @@ from .balancer import (
     phase_index,
 )
 from .controls import BATTERY_POWER_MAX
+from .energy_policy import EnergyPolicyConfig, QuarterReading, decide_energy
 from .protocol import (
     ETX,
     RESPONSE_LABELS,
@@ -476,6 +478,7 @@ class CT002Snapshot:
     rev: int
     active_control: bool
     peakshaving_threshold: float
+    energy_strategy: str
     consumer_ttl: int | None
     dedupe_window: float
     debug_status: bool
@@ -516,6 +519,13 @@ class CT002:
         device_id: str = "",
         clock: Callable[[], float] | None = None,
         reset_fn: Callable[[], None] | None = None,
+        quarter_shaving: bool = False,
+        night_charge: bool = False,
+        night_charge_start: str = "00:00",
+        night_charge_end: str = "06:00",
+        night_charge_power: float = 800.0,
+        night_charge_timezone: str = "Europe/Brussels",
+        wall_clock: Callable[[], float] | None = None,
     ) -> None:
         self.udp_port = udp_port
         self.ct_mac = normalize_ct_mac(ct_mac)
@@ -526,6 +536,30 @@ class CT002:
         self.debug_status = debug_status
         self.active_control = active_control
         self.peakshaving_threshold = 0.0
+        self.quarter_shaving = quarter_shaving
+        self.night_charge = night_charge
+        self.night_charge_start = night_charge_start
+        self.night_charge_end = night_charge_end
+        self.night_charge_power = night_charge_power
+        if (
+            not math.isfinite(night_charge_power)
+            or not 0 <= night_charge_power <= 10000
+        ):
+            raise ValueError("night_charge_power must be between 0 and 10000 W")
+        self.night_charge_timezone = night_charge_timezone
+        self._energy_zone = ZoneInfo(night_charge_timezone) if night_charge else None
+        self._wall_clock = wall_clock or time.time
+        self._energy_config = EnergyPolicyConfig(
+            night_charge_enabled=night_charge,
+            quarter_enabled=quarter_shaving,
+            charge_start_minute=self._parse_charge_time(night_charge_start),
+            charge_end_minute=self._parse_charge_time(night_charge_end),
+            night_charge_power_w=night_charge_power,
+            max_charge_w=1000000.0,
+            max_discharge_w=1000000.0,
+        )
+        self.quarter_reading: QuarterReading | None = None
+        self.energy_strategy = "instantaneous"
         self.before_send: (
             Callable[[tuple, CT002Request, str], Awaitable[list[float] | None]] | None
         ) = None
@@ -1028,6 +1062,35 @@ class CT002:
             and not self._consumer_expired(c, now)
         ]
         steered_power = sum(steered)
+        if self.quarter_shaving or self.night_charge:
+            wall = self._wall_clock()
+            # An unsynchronized boot clock must not start a night charge.
+            local = (
+                datetime.fromtimestamp(wall, self._energy_zone)
+                if wall >= 1577836800 and self._energy_zone is not None
+                else None
+            )
+            decision = decide_energy(
+                dataclasses.replace(
+                    self._energy_config, threshold_w=self.peakshaving_threshold
+                ),
+                grid_w=total,
+                battery_w=steered_power,
+                epoch=max(0.0, wall),
+                local_minute=local.hour * 60 + local.minute if local else None,
+                quarter=self.quarter_reading,
+            )
+            self.energy_strategy = (
+                "quarter" if decision.quarter_used else "instantaneous"
+            )
+            if decision.night_window:
+                self.energy_strategy += "+night_charge"
+            hold = (
+                decision.battery_target_w == 0
+                and all(abs(p) <= PEAKSHAVING_IDLE_BAND_W for p in steered)
+                and min(steered, default=0) < 0 < max(steered, default=0)
+            )
+            return decision.correction_w, hold
         household_demand = total + steered_power
         if household_demand <= 0:
             return total, False
@@ -1037,6 +1100,15 @@ class CT002:
             and min(steered, default=0) < 0 < max(steered, default=0)
         )
         return total - min(household_demand, self.peakshaving_threshold), hold
+
+    @staticmethod
+    def _parse_charge_time(value: str) -> int:
+        import re
+
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+            raise ValueError("night charge times must use HH:MM (00:00 to 23:59)")
+        hour, minute = map(int, value.split(":"))
+        return hour * 60 + minute
 
     def _probe_output(self) -> float:
         """What batteries still detecting their phase report they put out.
@@ -1271,6 +1343,9 @@ class CT002:
             rev=self._rev,
             active_control=self.active_control,
             peakshaving_threshold=self.peakshaving_threshold,
+            energy_strategy=self.energy_strategy
+            if self.peakshaving_threshold > 0
+            else "self_consumption",
             consumer_ttl=self.consumer_ttl,
             dedupe_window=self.dedupe_time_window,
             debug_status=self.debug_status,
@@ -1470,8 +1545,9 @@ class CT002:
 
         Returns ``(result, failed)``.  ``failed`` is ``True`` only when the
         hook *raised* (the powermeter is unavailable); the caller uses it to
-        send a zero-adjustment "hold" instead of re-driving control from a
-        stale cached reading.  A hook that simply returns ``None`` (e.g. no
+        hold output (or request zero battery power for the energy policy)
+        instead of re-driving control from a stale cached reading.
+        A hook that simply returns ``None`` (e.g. no
         powermeter matches this client) is *not* a failure.
         """
         if not self.before_send:
@@ -1495,9 +1571,9 @@ class CT002:
             ):
                 logger.warning(
                     "CT002 before_send failed (%d in a row) for %s: %s. "
-                    "The CT002 emulator is sending a zero adjustment so "
-                    "batteries hold their current output until the "
-                    "powermeter recovers.",
+                    "Stale meter data is excluded from control; automatic "
+                    "energy-policy batteries are asked to stop, otherwise "
+                    "the existing output is held until the meter recovers.",
                     self._before_send_failure_count,
                     request.addr,
                     exc,
@@ -1815,14 +1891,15 @@ class CT002:
     ) -> _ServedTarget:
         """The raw meter reading, the per-phase target, and the meter verdict.
 
-        On a meter failure the target is a literal ``[0, 0, 0]`` *hold*, not a
-        reading: the CT002 instruction is a delta
+        On a meter failure the default is a literal ``[0, 0, 0]`` *hold*,
+        not a reading: the CT002 instruction is a delta
         (``new_target = current_power + grid_field``), so re-issuing one derived
         from a frozen reading winds the battery up in active control (issue
         #403).  A battery detecting its phase gets neither: :meth:`_serve` does
         not answer it, since it would read the hold as a move.  The ESPHome
         component does the same when its sensor ages out (see
-        esphome/components/ct002/ct002.cpp).
+        esphome/components/ct002/ct002.cpp). The opt-in energy policy instead
+        subtracts freshly reported automatic battery output to request a stop.
         """
         values: list[float] = [0.0, 0.0, 0.0]
         stored = None if meter_failed else self._get_consumer_value(request.consumer_id)
@@ -1849,6 +1926,21 @@ class CT002:
         # on the literal zero adjustment.
         if self.active_control and not request.in_inspection_mode and not meter_failed:
             values = self._compute_smooth_target(values, request.consumer_id)
+        elif (
+            meter_failed
+            and self.active_control
+            and self.peakshaving_threshold > 0
+            and (self.quarter_shaving or self.night_charge)
+            and not request.in_inspection_mode
+            and self._consumer_mode(request.consumer_id).mode == "auto"
+        ):
+            # End scheduled output on meter loss using the fresh battery poll;
+            # do not feed a fabricated zero grid into the stateful balancer.
+            values = [0.0, 0.0, 0.0]
+            values[phase_index(request.phase) if request.phase != "D" else 0] = -float(
+                request.power
+            )
+            self.energy_strategy = "meter_unavailable_stop"
         return _ServedTarget(raw_values, three_phases(values), meter_failed)
 
     def _record_instructed_power(

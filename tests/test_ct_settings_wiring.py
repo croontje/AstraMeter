@@ -38,6 +38,12 @@ DESTINATIONS = {
     "debug_status": lambda ct002: ct002.debug_status,
     "active_control": lambda ct002: ct002.active_control,
     "peakshaving_threshold": lambda ct002: ct002.peakshaving_threshold,
+    "quarter_shaving": lambda ct002: ct002.quarter_shaving,
+    "night_charge": lambda ct002: ct002.night_charge,
+    "night_charge_start": lambda ct002: ct002.night_charge_start,
+    "night_charge_end": lambda ct002: ct002.night_charge_end,
+    "night_charge_power": lambda ct002: ct002.night_charge_power,
+    "night_charge_timezone": lambda ct002: ct002.night_charge_timezone,
     # Balancer configuration.
     "fair_distribution": lambda ct002: _cfg(ct002).fair_distribution,
     "balance_gain": lambda ct002: _cfg(ct002).balance_gain,
@@ -125,6 +131,11 @@ def distinct_settings() -> CtSettings:
             values[field.name] = f"value{index}"
         elif default is None:  # consumer_ttl
             values[field.name] = 1000 + index
+    values.update(
+        night_charge_start="01:23",
+        night_charge_end="07:45",
+        night_charge_timezone="UTC",
+    )
     return replace(CtSettings(), **values)
 
 

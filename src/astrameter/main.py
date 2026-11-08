@@ -140,6 +140,12 @@ def _build_ct002(
         debug_status=debug_status,
         active_control=ct.active_control,
         peakshaving_threshold=ct.peakshaving_threshold,
+        quarter_shaving=ct.quarter_shaving,
+        night_charge=ct.night_charge,
+        night_charge_start=ct.night_charge_start,
+        night_charge_end=ct.night_charge_end,
+        night_charge_power=ct.night_charge_power,
+        night_charge_timezone=ct.night_charge_timezone,
         balancer=_balancer_config(ct),
         saturation_detection=ct.saturation_detection,
         saturation_alpha=ct.saturation_alpha,
@@ -241,7 +247,12 @@ def _build_device(
             _request: CT002Request | None = None,
             _consumer_id: str | None = None,
         ) -> list[float] | None:
-            return await read_ct_powermeter(addr, powermeters)
+            device.quarter_reading = None
+            values = await read_ct_powermeter(addr, powermeters)
+            configured = powermeter_for(powermeters, addr[0])
+            if configured is not None:
+                device.quarter_reading = configured.powermeter.quarter_reading()
+            return values
 
         device.before_send = update_readings
         return device

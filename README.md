@@ -1,5 +1,9 @@
 # AstraMeter
 
+CT002/CT003 supports optional [scheduled grid charging and fixed-quarter demand
+control](docs/ct002.md#scheduled-charging-and-fixed-quarter-demand), using the
+existing CT connection. Both policies are off by default.
+
 > **Formerly known as b2500-meter.** We renamed the project because it supports
 > the full range of Marstek storage systems (B2500, Jupiter, Venus, …), not just
 > the B2500.

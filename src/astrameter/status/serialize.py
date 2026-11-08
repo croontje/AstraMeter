@@ -347,6 +347,7 @@ def ct002_to_wire(device: CT002Snapshot) -> dict[str, Any]:
                     "peakshaving_threshold_w": round_or_none(
                         device.peakshaving_threshold
                     ),
+                    "energy_strategy": device.energy_strategy,
                     "consumer_ttl_s": device.consumer_ttl,
                     "dedupe_window_s": round_or_none(device.dedupe_window),
                     "debug_status": device.debug_status,

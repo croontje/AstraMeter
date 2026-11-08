@@ -1,4 +1,11 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from astrameter.powermeter.base import Powermeter
+
+if TYPE_CHECKING:
+    from astrameter.ct002.energy_policy import QuarterReading
 
 
 class PowermeterWrapper(Powermeter):
@@ -12,6 +19,9 @@ class PowermeterWrapper(Powermeter):
 
     def stream_online(self) -> bool | None:
         return self.wrapped_powermeter.stream_online()
+
+    def quarter_reading(self) -> QuarterReading | None:
+        return self.wrapped_powermeter.quarter_reading()
 
     async def wait_for_message(self, timeout: float = 5) -> None:
         await self.wrapped_powermeter.wait_for_message(timeout)

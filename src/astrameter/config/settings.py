@@ -156,6 +156,12 @@ class CtSettings:
     # Active control / balancing.
     active_control: bool = True
     peakshaving_threshold: float = 0.0
+    quarter_shaving: bool = False
+    night_charge: bool = False
+    night_charge_start: str = "00:00"
+    night_charge_end: str = "06:00"
+    night_charge_power: float = 800.0
+    night_charge_timezone: str = "Europe/Brussels"
     fair_distribution: bool = True
     balance_gain: float = 0.2
     balance_deadband: int = 25

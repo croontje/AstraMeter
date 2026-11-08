@@ -288,6 +288,12 @@ export const OPTION_META: Record<string, OptionMeta> = {
       "Work out each battery's own target instead of relaying the raw grid " +
       "total and letting every battery react to it separately.",
   },
+  quarter_shaving: { label: "Quarter demand control", group: CONTROL, help: "Use validated fixed-quarter import data; fall back to instantaneous limiting when unavailable.", placeholder: "False" },
+  night_charge: { label: "Scheduled grid charging", group: CONTROL, help: "Charge in the local time window, yielding to the peak limit. Requires a positive peak shaving threshold.", placeholder: "False" },
+  night_charge_start: { label: "Charging window start", group: CONTROL, help: "Local HH:MM, inclusive. A window may cross midnight.", placeholder: "00:00" },
+  night_charge_end: { label: "Charging window end", group: CONTROL, help: "Local HH:MM, exclusive. Equal start and end disable charging.", placeholder: "06:00" },
+  night_charge_power: { label: "Scheduled charge power (W)", group: CONTROL, help: "Aggregate requested grid charge power; battery limits still apply. No extra battery API or state-of-charge polling.", placeholder: "800.0" },
+  night_charge_timezone: { label: "Charging timezone", group: CONTROL, help: "IANA timezone for the charging window, including daylight saving time.", placeholder: "Europe/Brussels" },
   peakshaving_threshold: {
     label: "Peak shaving threshold (W)",
     group: CONTROL,

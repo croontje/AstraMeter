@@ -29,6 +29,24 @@ configuration:
   active_control:
     name: Active Control
     description: "When enabled (default), the emulator smooths the grid reading, splits the target across batteries and balances them. Disable for relay mode: the raw per-phase readings are forwarded and each battery decides on its own. Only applies to CT002/CT003 device types."
+  quarter_shaving:
+    name: "Quarter demand control"
+    description: "Use validated fixed-quarter import data; fall back to instantaneous limiting when unavailable."
+  night_charge:
+    name: "Scheduled grid charging"
+    description: "Charge in the local time window, yielding to the peak limit. Requires a positive peak shaving threshold."
+  night_charge_start:
+    name: "Charging window start"
+    description: "Local HH:MM, inclusive. A window may cross midnight."
+  night_charge_end:
+    name: "Charging window end"
+    description: "Local HH:MM, exclusive. Equal start and end disable charging."
+  night_charge_power:
+    name: "Scheduled charge power (W)"
+    description: "Aggregate requested grid charge power; battery limits still apply. No extra battery API or state-of-charge polling."
+  night_charge_timezone:
+    name: "Charging timezone"
+    description: "IANA timezone for the charging window, including daylight saving time."
   peakshaving_threshold:
     name: Peak Shaving Threshold
     description: "For tariffs that bill on peak demand (e.g. the Belgian capacity tariff): the batteries only cover net household demand above this many watts. Below it they stay idle instead of covering everyday load, while solar surplus still charges them. Set to 0 to disable (default); up to 10000. Also adjustable live from the dashboard or Home Assistant. Only applies to CT002/CT003 device types with active control."

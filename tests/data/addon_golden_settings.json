@@ -47,7 +47,13 @@
     "saturation_grace_seconds": 200.0,
     "saturation_stall_timeout_seconds": 180.0,
     "udp_port": 12345,
-    "wifi_rssi": -50
+    "wifi_rssi": -50,
+    "quarter_shaving": true,
+    "night_charge": true,
+    "night_charge_start": "01:30",
+    "night_charge_end": "05:45",
+    "night_charge_power": 650.0,
+    "night_charge_timezone": "UTC"
   },
   "general": {
     "dashboard": true,
@@ -171,7 +177,13 @@
     "saturation_stall_timeout_seconds": 180.0,
     "smooth_target_alpha": 0.35,
     "throttle_interval": 2.5,
-    "wait_for_next_message": false
+    "wait_for_next_message": false,
+    "quarter_shaving": true,
+    "night_charge": true,
+    "night_charge_start": "01:30",
+    "night_charge_end": "05:45",
+    "night_charge_power": 650.0,
+    "night_charge_timezone": "UTC"
   },
   "power_source_signal": {
     "deadband": 6.0,

@@ -1,11 +1,14 @@
 import functools
 import json
 import logging
+import time
 from typing import Any
 
 import aiohttp
 from aiohttp import BasicAuth
 from jsonpath_ng.ext import parse
+
+from astrameter.ct002.energy_policy import QuarterReading, QuarterTracker
 
 from .base import as_list
 from .http_client import HttpPowermeter
@@ -54,6 +57,11 @@ class JsonHttpPowermeter(HttpPowermeter):
             BasicAuth(username or "", password or "") if username or password else None
         )
         self.headers = headers or {}
+        self._quarter_tracker = QuarterTracker()
+        self._quarter: QuarterReading | None = None
+
+    def quarter_reading(self) -> QuarterReading | None:
+        return self._quarter
 
     def _session_options(self) -> dict[str, Any]:
         return {
@@ -63,6 +71,7 @@ class JsonHttpPowermeter(HttpPowermeter):
         }
 
     async def get_powermeter_watts(self) -> list[float]:
+        self._quarter = None
         try:
             data = await self.get_json(self.url)
         except json.JSONDecodeError as e:
@@ -71,4 +80,20 @@ class JsonHttpPowermeter(HttpPowermeter):
         except aiohttp.ClientError as e:
             logger.error("JSON HTTP: request failed: %s", e)
             raise ValueError(f"HTTP request error: {e}") from e
-        return [extract_json_value(data, path) for path in self.json_paths]
+        values = [extract_json_value(data, path) for path in self.json_paths]
+        # HomeWizard v1 publishes these registers in the same response as
+        # power. Only use them with the unmodified whole-house power field.
+        # Other JSON sources continue working without quarter telemetry.
+        if self.json_paths == ["$.active_power_w"] and isinstance(data, dict):
+            q = data.get("active_power_average_w")
+            imported = data.get("total_power_import_kwh")
+            if (
+                isinstance(q, (int, float))
+                and isinstance(imported, (int, float))
+                and not isinstance(q, bool)
+                and not isinstance(imported, bool)
+            ):
+                self._quarter = self._quarter_tracker.feed(
+                    float(q), float(imported), time.time(), time.monotonic()
+                )
+        return values

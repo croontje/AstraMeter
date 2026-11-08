@@ -351,6 +351,7 @@ dependencies = [
     { name = "pymodbus" },
     { name = "pyserial-asyncio-fast" },
     { name = "smllib" },
+    { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
@@ -385,6 +386,7 @@ requires-dist = [
     { name = "smllib" },
     { name = "textual", marker = "extra == 'sim'", specifier = ">=1.0.0" },
     { name = "textual-plot", marker = "extra == 'sim'", specifier = ">=0.10.1" },
+    { name = "tzdata" },
 ]
 provides-extras = ["dev", "sim"]
 

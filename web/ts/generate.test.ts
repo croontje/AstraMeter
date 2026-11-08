@@ -1192,5 +1192,30 @@ has(haDashReadOnly, "dashboard_allow_write: false", "ha-opts: read-only dashboar
 }
 
 
+const energyState = {
+  general: { deviceTypes: ["ct002"] },
+  meters: [{ type: "json_http", phases: 1, fields: { URL: "http://p1/api/v1/data", JSON_PATHS: "$.active_power_w" }, tuning: {} }],
+  ct: { fields: { PEAKSHAVING_THRESHOLD: "2400", QUARTER_SHAVING: "True", NIGHT_CHARGE: "True",
+    NIGHT_CHARGE_START: "22:00", NIGHT_CHARGE_END: "06:00", NIGHT_CHARGE_POWER: "800", NIGHT_CHARGE_TIMEZONE: "Europe/Brussels" } },
+};
+has(generateConfigIni(energyState), "NIGHT_CHARGE_START = 22:00", "energy: INI window");
+const energyYaml = generateEsphome(energyState);
+has(energyYaml, "energy_time_id: energy_time", "energy: firmware uses synchronized clock");
+has(energyYaml, "quarter_sensor: quarter_import", "energy: firmware wires quarter register");
+has(energyYaml, 'root["active_power_average_w"]', "energy: same HTTP response supplies import");
+ok((energyYaml.match(/http_request.get:/g) || []).length === 1, "energy: no extra meter request");
+has(generateHomeAssistant(energyState), "night_charge: true", "energy: add-on boolean stays boolean");
+has(generateHomeAssistant(energyState), 'night_charge_timezone: "Europe/Brussels"', "energy: add-on timezone");
+for (const badMeter of [
+  { ...energyState.meters[0], fields: { ...energyState.meters[0].fields, JSON_PATHS: "$.phase_a" } },
+  { ...energyState.meters[0], tuning: { POWER_OFFSET: "100" } },
+  { ...energyState.meters[0], tuning: { POWER_MULTIPLIER: "2" } },
+]) {
+  let rejected = false;
+  try { generateEsphome({ ...energyState, meters: [badMeter] }); }
+  catch { rejected = true; }
+  ok(rejected, "energy: firmware generator rejects inconsistent power and energy inputs");
+}
+
 console.log("\n" + (failures ? `${failures} FAILED` : "ALL PASSED"));
 process.exit(failures ? 1 : 0);

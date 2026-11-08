@@ -21,6 +21,10 @@
 #include "pid.h"
 #include "sensor_backed.h"
 #include "status_json.h"
+#include "energy_policy.h"
+#ifdef USE_CT002_ENERGY_POLICY
+#include "esphome/components/time/real_time_clock.h"
+#endif
 #include "wrapper_base.h"
 
 // The dashboard's read/write state layer (dashboard_state.cpp) is compiled for
@@ -215,6 +219,21 @@ class CT002Component : public Component {
   void set_udp_port(uint16_t v) { this->udp_port_ = v; }
   void set_active_control(bool v) { this->active_control_ = v; }
   void set_peakshaving_threshold(float threshold);
+#ifdef USE_CT002_ENERGY_POLICY
+  void set_energy_policy(time::RealTimeClock *clock, bool quarter, bool night, int start, int end, float watts) {
+    energy_clock_ = clock;
+    energy_config_.quarter_enabled = quarter;
+    energy_config_.night_charge_enabled = night;
+    energy_config_.charge_start_minute = start;
+    energy_config_.charge_end_minute = end;
+    energy_config_.night_charge_power_w = watts;
+    energy_config_.max_charge_w = energy_config_.max_discharge_w = 1000000.0;
+  }
+  void set_energy_sensors(sensor::Sensor *quarter, sensor::Sensor *imported) {
+    quarter_sensor_ = quarter; import_sensor_ = imported;
+  }
+#endif
+  std::string energy_strategy() const { return energy_strategy_; }
   void set_max_sensor_age_ms(uint32_t v) { this->max_sensor_age_ms_ = v; }
 #ifdef USE_CT002_TEST_HOOKS
   // Enable the test-control UDP server on this port. Only compiled when the
@@ -491,7 +510,7 @@ class CT002Component : public Component {
   // Caps household demand handed to the balancer at peakshaving_threshold_,
   // and says whether the steered batteries should idle at 0 W (mirrors
   // CT002._peakshaving in ct002.py).
-  std::pair<float, bool> peakshaving_(float total) const;
+  std::pair<float, bool> peakshaving_(float total);
   // Sum of the power reported by batteries still detecting their phase, added
   // back onto the grid active control steers on so the steered batteries do
   // not cancel a detection probe (mirrors CT002._probe_output in ct002.py).
@@ -515,6 +534,15 @@ class CT002Component : public Component {
   uint16_t udp_port_{12345};
   bool active_control_{true};
   float peakshaving_threshold_{0.0f};
+  std::string energy_strategy_{"instantaneous"};
+#ifdef USE_CT002_ENERGY_POLICY
+  EnergyPolicyConfig energy_config_;
+  QuarterTracker quarter_tracker_;
+  time::RealTimeClock *energy_clock_{nullptr};
+  sensor::Sensor *quarter_sensor_{nullptr};
+  sensor::Sensor *import_sensor_{nullptr};
+  double quarter_seen_{-1}, import_seen_{-1};
+#endif
   uint32_t max_sensor_age_ms_{30000};
   // Fixed eviction TTL for stale consumers, in seconds (Python:
   // consumer_ttl). Unset (default) = adaptive per-consumer TTL derived from

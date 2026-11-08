@@ -45,6 +45,7 @@ status::DeviceStatus CT002Component::status_snapshot(double wall_now) const {
   out.started_at = wall_time_for(wall_now, static_cast<double>(::esphome::millis()) / 1000.0);
   out.active_control = this->active_control_;
   out.peakshaving_threshold = this->peakshaving_threshold_;
+  out.energy_strategy = this->peakshaving_threshold_ > 0 ? this->energy_strategy_ : "self_consumption";
   out.consumer_ttl_s = this->consumer_ttl_seconds_;
   out.dedupe_window_s = static_cast<float>(this->dedupe_window_ms_) / 1000.0f;
 
