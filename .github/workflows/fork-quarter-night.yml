@@ -1,0 +1,143 @@
+name: Fork quarter-night image
+
+on:
+  push:
+    branches: [feature/scheduled-quarter-shaving]
+
+concurrency:
+  group: fork-quarter-night-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.repository == 'croontje/AstraMeter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Python dependencies
+        run: uv sync --frozen --extra dev --extra sim
+      - name: Lint and type check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy src/
+      - name: Test controller, telemetry, configuration and C++ parity
+        run: >-
+          uv run pytest
+          src/astrameter/ct002/energy_policy_test.py
+          tests/components/ct002/test_energy_policy_parity.py
+          tests/test_scheduled_quarter.py
+          tests/test_ct002_peakshaving.py
+          tests/test_balancer_power_limits.py
+          tests/test_ct_settings_wiring.py
+          tests/test_addon_golden_settings.py
+      - name: Check dashboard and configuration generator
+        working-directory: web
+        run: |
+          npm ci
+          npm run check
+      - name: Install test browser
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Test dashboard against the simulated CT stack
+        working-directory: web
+        run: npm run e2e -- dashboard.spec.ts
+      - name: Keep browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: quarter-night-browser-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/croontje/astrameter
+      LOCAL_IMAGE: astrameter-check:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the unRAID image locally on the GitHub runner
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.LOCAL_IMAGE }}
+          build-args: GIT_COMMIT_SHA=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/croontje/AstraMeter
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+          cache-from: type=gha,scope=fork-quarter-night-amd64
+          cache-to: type=gha,mode=max,scope=fork-quarter-night-amd64
+      - name: Smoke-test the container without network access
+        run: |
+          docker run --rm --network none --entrypoint python "$LOCAL_IMAGE" -c \
+            "from astrameter.ct002.ct002 import CT002; CT002(night_charge=True, quarter_shaving=True, peakshaving_threshold=2400); print('Controller and timezone OK')"
+          cat > "$RUNNER_TEMP/astrameter-smoke.ini" <<'INI'
+          [GENERAL]
+          DEVICE_TYPE = ct003
+          SKIP_POWERMETER_TEST = True
+          DASHBOARD_ENABLED = True
+          [CT003]
+          PEAKSHAVING_THRESHOLD = 2400
+          QUARTER_SHAVING = True
+          NIGHT_CHARGE = True
+          NIGHT_CHARGE_TIMEZONE = Europe/Brussels
+          [JSON_HTTP]
+          URL = http://127.0.0.1:9/unused
+          JSON_PATHS = $.active_power_w
+          INI
+          docker run -d --name astrameter-smoke --network none \
+            -v "$RUNNER_TEMP/astrameter-smoke.ini:/app/config.ini:ro" \
+            "$LOCAL_IMAGE" astrameter -c /app/config.ini
+          trap 'docker rm -f astrameter-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if docker exec astrameter-smoke curl -fsS http://127.0.0.1:52500/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs astrameter-smoke
+          exit 1
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the tested image
+        run: |
+          docker tag "$LOCAL_IMAGE" "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          docker tag "$LOCAL_IMAGE" "$IMAGE:quarter-night"
+          docker push "$IMAGE:quarter-night"
+          printf 'Image: `%s:quarter-night`\n\nPinned image: `%s:sha-%s`\n\nNo unRAID deployment is performed.\n' \
+            "$IMAGE" "$IMAGE" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
