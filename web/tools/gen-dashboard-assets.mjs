@@ -51,7 +51,11 @@ const bundle = await build({
 });
 
 const js = bundle.outputFiles[0].text;
-const css = await readFile(resolve(repo, "web/css/dashboard.css"), "utf8");
+// Windows checkouts may use CRLF. Git normalizes the HTML artifact, but it
+// cannot normalize line endings inside its gzipped C array. Normalize before
+// compressing so both committed artifacts represent the same document.
+const css = (await readFile(resolve(repo, "web/css/dashboard.css"), "utf8"))
+  .replace(/\r\n/g, "\n");
 
 const html = `<!doctype html>
 <html lang="en">
