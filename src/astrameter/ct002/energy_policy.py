@@ -62,7 +62,8 @@ class QuarterTracker:
 
     Fixed quarters use UTC epoch boundaries (:00/:15/:30/:45 in Brussels too).
     A process restart waits for 30 seconds of consistent growth; it never
-    assumes that earlier import was zero. A reset invalidates the whole slot.
+    assumes that earlier import was zero. Quarter-register resets during the
+    initial settling period are expected; later resets invalidate the slot.
     """
 
     def __init__(self) -> None:
@@ -88,7 +89,15 @@ class QuarterTracker:
                 or abs(epoch - pe - monotonic + pm) > 2
             ):
                 self.anchor = None
-            if int(pe // 900) == window and (accumulated_w < pq - 1 or import_kwh < pi):
+            # The meter may briefly return the previous quarter's register
+            # after our clock crosses the boundary. Only compare quarter
+            # decreases once BOTH samples are outside the settling period.
+            # The cumulative import counter must never reset within a slot,
+            # including during settling.
+            quarter_reset = (
+                epoch % 900 >= 15 and pe % 900 >= 15 and accumulated_w < pq - 1
+            )
+            if int(pe // 900) == window and (quarter_reset or import_kwh < pi):
                 self.bad_window = window
         if epoch % 900 < 15 or self.bad_window == window:
             self.anchor = None

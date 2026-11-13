@@ -2,7 +2,7 @@
 
 ## Next
 
-- **Added** optional scheduled grid charging and fixed-quarter peak control: charging yields to the available import budget, with automatic instantaneous fallback when quarter measurements are unavailable.
+- **Added** optional scheduled grid charging and fixed-quarter peak control: charging yields to the import budget, tolerates delayed meter rollover, and falls back to instantaneous limiting when quarter measurements are unavailable.
 
 - **Fixed** batteries charging on and off with active control once a full Venus passes its PV surplus to the grid; the others now keep charging steadily ([#763](https://github.com/tomquist/astrameter/issues/763), [#771](https://github.com/tomquist/astrameter/pull/771)).
 

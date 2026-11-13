@@ -80,6 +80,26 @@ cd web && npm ci && npm run check
 
 ## Remaining release checks and limits
 
+### Quarter rollover correction (2026-11-13)
+
+A previous-quarter register briefly returned after the wall-clock boundary
+could make its subsequent normal reset reject the entire new quarter. Both
+Python and C++ now compare quarter-register decreases only when both samples
+are past the first 15 seconds. The first accepted sample still needs 30 seconds
+of consistent growth. Cumulative import-counter decreases remain invalid even
+during settling; later quarter-register resets still reject the slot.
+
+The regression failed on the original implementation. All 171 targeted tests
+pass with the fix, including ten Python/C++ cases covering resets at seconds
+1, 3, 14, 15 and 16, with and without a cumulative import-counter reset.
+An HTTP-adapter/controller integration test verifies recovery after 45 seconds
+without any additional telemetry request. The ESP32 ESP-IDF energy-policy
+configuration compiles successfully. The actual earlier live fallback cannot
+be attributed conclusively because its raw counter samples were not logged.
+
+This correction is developed locally and published through the fork workflow;
+deployment on unRAID still requires separate permission.
+
 The fork's `Fork quarter-night image` workflow runs on pushes to this feature
 branch. It checks the targeted Python/C++ tests and dashboard in Linux, builds
 an amd64 container, and smoke-tests it without networking before publishing

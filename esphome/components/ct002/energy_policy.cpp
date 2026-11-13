@@ -68,7 +68,12 @@ std::optional<QuarterReading> QuarterTracker::feed(double q, double imported, do
   if (previous_) {
     const auto &p = *previous_;
     if (mono < p.mono || mono-p.mono > 10 || std::abs(epoch-p.epoch-mono+p.mono) > 2) anchor_.reset();
-    if (std::floor(p.epoch / 900) == window && (q < p.q-1 || imported < p.imported)) bad_window_ = window;
+    // A delayed normal quarter reset is expected during settling. Compare
+    // decreases only when both samples are settled; cumulative import must
+    // remain monotonic even during settling. Mirrors QuarterTracker.feed.
+    const bool quarter_reset = std::fmod(epoch, 900) >= 15 &&
+        std::fmod(p.epoch, 900) >= 15 && q < p.q-1;
+    if (std::floor(p.epoch / 900) == window && (quarter_reset || imported < p.imported)) bad_window_ = window;
   }
   previous_ = point;
   if (std::fmod(epoch, 900) < 15 || bad_window_ == window) {

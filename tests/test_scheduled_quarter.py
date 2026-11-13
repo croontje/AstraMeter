@@ -1,6 +1,7 @@
 """Integration of policy, telemetry, existing balancer and configuration."""
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
@@ -90,6 +91,35 @@ def test_counter_validation_restart_gaps_reset_and_clock_jump():
     for t in range(915, 946):
         reading = tracker.feed(t - 900, 101 + (t - 900) / 4000, t, t + 54)
     assert reading is not None
+
+
+@pytest.mark.asyncio
+async def test_delayed_meter_rollover_restores_quarter_control(monkeypatch):
+    wall = epoch(1) - 1
+    monkeypatch.setattr(
+        "astrameter.powermeter.json_http.time",
+        SimpleNamespace(time=lambda: wall, monotonic=lambda: wall),
+    )
+    meter = JsonHttpPowermeter("http://unused", "$.active_power_w")
+    meter.get_json = AsyncMock()
+    device = CT002(
+        peakshaving_threshold=2400, quarter_shaving=True, wall_clock=lambda: wall
+    )
+    device._update_consumer_report("battery", "A", 0)
+    for offset in [-1, 0, *range(3, 61, 3)]:
+        wall = epoch(1) + offset
+        meter.get_json.return_value = {
+            "active_power_w": 900,
+            "active_power_average_w": 1000 if offset <= 0 else offset,
+            "total_power_import_kwh": 100 + (offset + 1) / 4000,
+        }
+        grid = await meter.get_powermeter_watts()
+        device.quarter_reading = meter.quarter_reading()
+        device._apply_peakshaving(grid[0])
+        assert device.energy_strategy == (
+            "quarter" if offset >= 45 else "instantaneous"
+        )
+    assert meter.get_json.await_count == 22  # no additional telemetry request
 
 
 @pytest.mark.asyncio

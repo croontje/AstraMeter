@@ -18,8 +18,9 @@ from astrameter.ct002.energy_policy import (
 ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.fixture
-def policy_binary(tmp_path: Path) -> Path:
+@pytest.fixture(scope="module")
+def policy_binary(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    tmp_path = tmp_path_factory.mktemp("energy_policy")
     compiler = shutil.which("g++") or shutil.which("clang++")
     if compiler is None:
         pytest.skip("a C++17 compiler is required for energy policy parity")
@@ -144,3 +145,49 @@ def test_shared_quarter_tracker_vectors(policy_binary: Path) -> None:
             assert row == "invalid"
         else:
             assert [float(v) for v in row.split()] == pytest.approx(astuple(value))
+
+
+@pytest.mark.parametrize("reset_second", [1, 3, 14, 15, 16])
+@pytest.mark.parametrize("import_counter_reset", [False, True])
+def test_rollover_recovers_without_hiding_counter_resets(
+    policy_binary: Path, reset_second: int, import_counter_reset: bool
+) -> None:
+    # The meter can still return the previous quarter's register just after
+    # our clock crosses :00. The next response carries its normal reset.
+    points = [(1000.0, 100.0, 899, 899)]
+    for epoch in [*range(900, 961), *range(1800, 1846)]:
+        elapsed = epoch % 900
+        old_register = epoch < 900 + reset_second
+        q = float(1000 + elapsed if old_register else elapsed)
+        imported = 100 + (epoch - 899) / 4000
+        if import_counter_reset and not old_register:
+            imported -= 50
+        points.append((q, imported, epoch, epoch))
+
+    result = subprocess.run(
+        [str(policy_binary), "tracker"],
+        input="\n".join(" ".join(map(str, point)) for point in points) + "\n",
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    lines = result.stdout.splitlines()
+    assert len(lines) == len(points)
+    tracker = QuarterTracker()
+    for point, line in zip(points, lines, strict=True):
+        epoch = point[2]
+        # A reset first observed at the initial settled sample is allowed.
+        # Once both samples are settled, a drop must reject the whole slot.
+        accepted = (
+            945 <= epoch < 1800 and reset_second <= 15 and not import_counter_reset
+        ) or epoch >= 1845
+        reading = tracker.feed(*point)
+        assert (reading is not None) == accepted, (epoch, point)
+        if accepted:
+            assert reading == QuarterReading(point[0], epoch)
+            assert [float(value) for value in line.split()] == pytest.approx(
+                [point[0], epoch]
+            )
+        else:
+            assert line == "invalid"
