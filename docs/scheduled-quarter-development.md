@@ -99,6 +99,21 @@ than 3000 W but remains below 3500 W. The dashboard shows the effective target
 and `+monthly_peak`; the firmware generator supplies the same register with
 double precision. Web type checks, unit tests and generated-asset checks pass.
 
+The ESP32 ESP-IDF energy configuration compiles, including the monthly input
+setter and dashboard status. The 47-scenario, five-seed default-policy steering
+evaluation is unchanged across all 17 aggregate metrics versus the rollover
+baseline, with no guardrail regressions; the explicit monthly tests above
+exercise the new behavior. Additional main/status checks pass (50 tests) with
+two Windows path-specific checks excluded after their platform failures.
+
+[Fork run 43411988738](https://github.com/croontje/AstraMeter/actions/runs/43411988738)
+passes the 221 targeted tests, 11 browser tests, lint/type and web checks, and
+the isolated container startup check. It publishes revision
+`211f0269b8387993ae3041795d8dc8a78ae44cab` as `quarter-night` and its pinned
+`sha-211f0269b8387993ae3041795d8dc8a78ae44cab` tag. Anonymous registry access
+verified the amd64 image and digest
+`sha256:825a9c96233c02d8271b7f3341596d3b6b48f18510eb1c37a785c13f399fe8fd`.
+
 Broader Windows checks were attempted: the component suite stopped at the two
 existing code-generation permission failures (141 passed), and the full suite
 at those plus the existing Tibber fixture line-ending failure (205 passed,
