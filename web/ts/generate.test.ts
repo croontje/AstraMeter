@@ -1203,6 +1203,8 @@ const energyYaml = generateEsphome(energyState);
 has(energyYaml, "energy_time_id: energy_time", "energy: firmware uses synchronized clock");
 has(energyYaml, "quarter_sensor: quarter_import", "energy: firmware wires quarter register");
 has(energyYaml, 'root["active_power_average_w"]', "energy: same HTTP response supplies import");
+has(energyYaml, 'id(ct002_main).set_monthly_peak(', "energy: same HTTP response supplies monthly maximum");
+has(energyYaml, 'root["montly_power_peak_timestamp"].as<double>()', "energy: monthly timestamp retains double precision");
 ok((energyYaml.match(/http_request.get:/g) || []).length === 1, "energy: no extra meter request");
 has(generateHomeAssistant(energyState), "night_charge: true", "energy: add-on boolean stays boolean");
 has(generateHomeAssistant(energyState), 'night_charge_timezone: "Europe/Brussels"', "energy: add-on timezone");

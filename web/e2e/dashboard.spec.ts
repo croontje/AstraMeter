@@ -8,6 +8,26 @@ test("shows the current energy policy from the controller", async ({ page }) => 
   await expect(page.getByTestId("energy-strategy")).toContainText("Energy policy:");
 });
 
+test("updates the monthly peak target and clears it on month rollover", async ({ page }) => {
+  let target = 3400;
+  await page.route("**/api/status", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const device of body.devices ?? []) {
+      device.control.energy_strategy = target === 3400 ? "quarter+night_charge+monthly_peak" : "quarter";
+      device.control.energy_threshold_w = target;
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(BASE_URL);
+  const policy = page.getByTestId("energy-strategy");
+  await expect(policy).toContainText("quarter + night charge + monthly peak");
+  await expect(policy).toContainText("Target 3400 W");
+  target = 2400;
+  await expect(policy).toContainText("Target 2400 W");
+  await expect(policy).not.toContainText("monthly peak");
+});
+
 test.beforeAll(async () => {
   stack = await startStack();
 });

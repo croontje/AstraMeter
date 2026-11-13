@@ -80,6 +80,31 @@ cd web && npm ci && npm run check
 
 ## Remaining release checks and limits
 
+### Monthly peak target (2026-11-13)
+
+Quarter mode now uses the official HomeWizard v1 monthly maximum from the
+existing power response. The effective target is the greater of the configured
+base and the current month's maximum minus 100 W. Both quarter budgeting and
+instantaneous fallback use it; night charging still yields to this budget.
+Missing, stale, future or invalid timestamps keep the base target. The local
+month follows the configured timezone, so the old maximum expires at local
+month rollover, including year and DST transitions. A restart reads the maximum
+from the meter again; no extra polls, battery API calls or state files are added.
+
+The Python and C++ policies match over 1000 randomized vectors and explicit
+monthly boundary/calendar cases. All 221 targeted tests pass, including an
+actual main-callback/status integration test and a simulated battery speaking
+the real UDP protocol: with a 3500 W existing peak, its test quarter uses more
+than 3000 W but remains below 3500 W. The dashboard shows the effective target
+and `+monthly_peak`; the firmware generator supplies the same register with
+double precision. Web type checks, unit tests and generated-asset checks pass.
+
+Broader Windows checks were attempted: the component suite stopped at the two
+existing code-generation permission failures (141 passed), and the full suite
+at those plus the existing Tibber fixture line-ending failure (205 passed,
+67 skipped). No live installation was changed. Hardware validation remains a
+separate step after the owner's deployment permission.
+
 ### Quarter rollover correction (2026-11-13)
 
 A previous-quarter register briefly returned after the wall-clock boundary

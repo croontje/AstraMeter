@@ -248,10 +248,14 @@ def _build_device(
             _consumer_id: str | None = None,
         ) -> list[float] | None:
             device.quarter_reading = None
+            device.monthly_peak_reading = None
             values = await read_ct_powermeter(addr, powermeters)
             configured = powermeter_for(powermeters, addr[0])
             if configured is not None:
                 device.quarter_reading = configured.powermeter.quarter_reading()
+                device.monthly_peak_reading = (
+                    configured.powermeter.monthly_peak_reading()
+                )
             return values
 
         device.before_send = update_readings

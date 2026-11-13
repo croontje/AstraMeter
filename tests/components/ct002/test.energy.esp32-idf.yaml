@@ -32,3 +32,8 @@ ct002:
   energy_time_id: energy_time
   quarter_sensor: quarter_import
   import_energy_sensor: total_import
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: 'id(ct002_main).set_monthly_peak(3500.0, 261106190000.0);'

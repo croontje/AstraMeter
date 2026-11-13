@@ -881,10 +881,15 @@ std::pair<float, bool> CT002Component::peakshaving_(float total) {
       }
     }
     energy_config_.threshold_w = peakshaving_threshold_;
-    const auto decision = decide_energy(energy_config_, total, steered_power, epoch, minute, quarter);
+    const std::optional<double> stamp = local.is_valid() ? std::optional<double>(
+        (local.year % 100)*1e10 + local.month*1e8 + local.day_of_month*1e6 +
+        local.hour*1e4 + local.minute*100 + local.second) : std::nullopt;
+    const auto decision = decide_energy(energy_config_, total, steered_power, epoch, minute, quarter, monthly_peak_, stamp);
     if (decision) {
+      energy_threshold_w_ = decision->effective_threshold_w;
       energy_strategy_ = decision->quarter_used ? "quarter" : "instantaneous";
       if (decision->night_window) energy_strategy_ += "+night_charge";
+      if (decision->monthly_peak_used) energy_strategy_ += "+monthly_peak";
       return {static_cast<float>(decision->correction_w),
               decision->battery_target_w == 0 && all_near_zero && any_charging && any_discharging};
     }

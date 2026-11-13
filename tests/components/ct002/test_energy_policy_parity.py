@@ -10,6 +10,7 @@ import pytest
 
 from astrameter.ct002.energy_policy import (
     EnergyPolicyConfig,
+    MonthlyPeakReading,
     QuarterReading,
     QuarterTracker,
     decide_energy,
@@ -65,6 +66,13 @@ def test_shared_energy_policy_vectors(policy_binary: Path) -> None:
         minute = rng.choice([None, 0, 359, 360, 1320, 1439])
         q = QuarterReading(rng.uniform(0, 3000), epoch + rng.choice([-4, -1, 0, 1]))
         quarter = rng.choice([None, q])
+        peak = MonthlyPeakReading(
+            rng.choice([2000, 2450, 3500, 4500, -1]),
+            rng.choice([261106190000, 261031190000, 261132000000, 261114000000]),
+            epoch + rng.choice([-4, -3, 0, 1]),
+        )
+        monthly_peak = rng.choice([None, peak])
+        local_stamp = rng.choice([None, 261113120000, 261201000000])
         expected.append(
             astuple(
                 decide_energy(
@@ -74,6 +82,8 @@ def test_shared_energy_policy_vectors(policy_binary: Path) -> None:
                     epoch=epoch,
                     local_minute=minute,
                     quarter=quarter,
+                    monthly_peak=monthly_peak,
+                    local_timestamp=local_stamp,
                 )
             )
         )
@@ -86,6 +96,9 @@ def test_shared_energy_policy_vectors(policy_binary: Path) -> None:
             quarter is not None,
             q.accumulated_w,
             q.sample_epoch,
+            monthly_peak is not None,
+            *astuple(peak),
+            local_stamp if local_stamp is not None else -1,
         )
         rows.append(
             " ".join(str(int(v)) if isinstance(v, bool) else str(v) for v in values)
@@ -104,6 +117,63 @@ def test_shared_energy_policy_vectors(policy_binary: Path) -> None:
         assert [float(v) for v in row.split()] == pytest.approx(
             [float(v) for v in target], abs=1e-6
         )
+
+
+@pytest.mark.parametrize(
+    "stamp,local_stamp,age,expected",
+    [
+        (261106190000, 261113120000, 0, 3400),
+        (261106190000, 261201000000, 0, 2400),
+        (261206190000, 270101000000, 0, 2400),
+        (261106190000, 261113120000, 4, 2400),
+        (261106190000, 261113120000, -1, 2400),
+        (261132000000, 261113120000, 0, 2400),
+        (261114000000, 261113120000, 0, 2400),
+        (240229120000, 240229130000, 0, 3400),
+        (260229120000, 260228130000, 0, 2400),
+    ],
+)
+def test_month_peak_python_cpp_known_outcomes(
+    policy_binary, stamp, local_stamp, age, expected
+):
+    cfg = EnergyPolicyConfig(quarter_enabled=True)
+    d = decide_energy(
+        cfg,
+        grid_w=3000,
+        battery_w=0,
+        epoch=450,
+        local_minute=600,
+        monthly_peak=MonthlyPeakReading(3500, stamp, 450 - age),
+        local_timestamp=local_stamp,
+    )
+    assert d.effective_threshold_w == expected
+    values = (
+        *astuple(cfg),
+        3000,
+        0,
+        450,
+        600,
+        False,
+        0,
+        450,
+        True,
+        3500,
+        stamp,
+        450 - age,
+        local_stamp,
+    )
+    result = subprocess.run(
+        [str(policy_binary)],
+        input=" ".join(str(int(v)) if isinstance(v, bool) else str(v) for v in values)
+        + "\n",
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    actual = [float(v) for v in result.stdout.split()]
+    assert actual == pytest.approx([float(v) for v in astuple(d)])
+    assert actual[-2] == expected
 
 
 def test_shared_quarter_tracker_vectors(policy_binary: Path) -> None:

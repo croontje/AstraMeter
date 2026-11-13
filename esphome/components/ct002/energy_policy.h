@@ -25,6 +25,13 @@ struct QuarterReading {
   double sample_epoch;
 };
 
+struct MonthlyPeakReading {
+  double power_w;
+  double timestamp;  // Local meter YYMMDDhhmmss, not receipt time.
+  double sample_epoch;
+};
+bool valid_peak_timestamp(double value);
+
 class QuarterTracker {
  public:
   std::optional<QuarterReading> feed(double accumulated_w, double import_kwh,
@@ -44,6 +51,8 @@ struct EnergyDecision {
   bool night_window;
   bool quarter_used;
   bool limited;
+  double effective_threshold_w;
+  bool monthly_peak_used;
 };
 
 bool in_charge_window(int minute, int start, int end);
@@ -52,7 +61,9 @@ bool in_charge_window(int minute, int start, int end);
 std::optional<EnergyDecision> decide_energy(
     const EnergyPolicyConfig &config, double grid_w, double battery_w,
     double epoch, std::optional<int> local_minute,
-    std::optional<QuarterReading> quarter = std::nullopt);
+    std::optional<QuarterReading> quarter = std::nullopt,
+    std::optional<MonthlyPeakReading> monthly_peak = std::nullopt,
+    std::optional<double> local_timestamp = std::nullopt);
 
 }  // namespace ct002
 }  // namespace esphome

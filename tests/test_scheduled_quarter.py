@@ -1,23 +1,171 @@
 """Integration of policy, telemetry, existing balancer and configuration."""
 
 from datetime import datetime
+from ipaddress import IPv4Network
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from astrameter.config.config_loader import ClientFilter
+from astrameter.config.settings import ConfiguredPowermeter, CtSettings, GeneralSettings
 from astrameter.ct002.ct002 import CT002, CT002Request
-from astrameter.ct002.energy_policy import QuarterReading, QuarterTracker
+from astrameter.ct002.energy_policy import (
+    MonthlyPeakReading,
+    QuarterReading,
+    QuarterTracker,
+)
+from astrameter.main import _build_device
 from astrameter.powermeter.json_http import JsonHttpPowermeter
 from astrameter.powermeter.wrappers.throttling import ThrottledPowermeter
 from astrameter.powermeter.wrappers.transform import TransformedPowermeter
+from astrameter.status.serialize import ct002_to_wire
 
 
 def epoch(hour: int, minute: int = 0) -> float:
     return datetime(
         2026, 11, 8, hour, minute, tzinfo=ZoneInfo("Europe/Brussels")
     ).timestamp()
+
+
+@pytest.mark.asyncio
+async def test_month_peak_from_same_response_survives_restart_and_missing_fields_clear_it(
+    monkeypatch,
+):
+    wall = epoch(12)
+    monkeypatch.setattr(
+        "astrameter.powermeter.json_http.time", SimpleNamespace(time=lambda: wall)
+    )
+    for _ in range(2):  # fresh process state must recover the meter's existing maximum
+        meter = JsonHttpPowermeter("http://unused", "$.active_power_w")
+        meter.get_json = AsyncMock(
+            return_value={
+                "active_power_w": 3000,
+                "montly_power_peak_w": 3500,
+                "montly_power_peak_timestamp": 261106190000,
+            }
+        )
+        wrapper = ThrottledPowermeter(meter, throttle_interval=1)
+        device = CT002(
+            peakshaving_threshold=2400, quarter_shaving=True, wall_clock=lambda: wall
+        )
+        device._update_consumer_report("battery", "A", 0)
+        await meter.get_powermeter_watts()
+        device.monthly_peak_reading = wrapper.monthly_peak_reading()
+        assert device._apply_peakshaving(3000) == 0
+        assert device.energy_threshold_w == 3400
+        assert device.energy_strategy == "instantaneous+monthly_peak"
+        assert meter.get_json.await_count == 1
+        assert (
+            TransformedPowermeter(meter, [0], [1]).monthly_peak_reading()
+            is device.monthly_peak_reading
+        )
+        assert TransformedPowermeter(meter, [10], [1]).monthly_peak_reading() is None
+        assert TransformedPowermeter(meter, [0], [2]).monthly_peak_reading() is None
+        meter.get_json.return_value = {"active_power_w": 3000}
+        await meter.get_powermeter_watts()
+        device.monthly_peak_reading = wrapper.monthly_peak_reading()
+        assert device._apply_peakshaving(3000) == 600
+        assert device.energy_threshold_w == 2400
+        assert device.energy_strategy == "instantaneous"
+
+
+@pytest.mark.parametrize(
+    "old_date,new_date,peak_stamp",
+    [
+        ((2026, 11, 30), (2026, 12, 1), 261106190000),
+        ((2026, 12, 31), (2027, 1, 1), 261206190000),
+        ((2026, 3, 31), (2026, 4, 1), 260306190000),  # DST summer offset
+    ],
+)
+def test_month_rollover_uses_brussels_calendar_even_with_fresh_cached_peak(
+    old_date, new_date, peak_stamp
+):
+    wall = datetime(
+        *old_date, 23, 59, 59, tzinfo=ZoneInfo("Europe/Brussels")
+    ).timestamp()
+    d = CT002(peakshaving_threshold=2400, quarter_shaving=True, wall_clock=lambda: wall)
+    d._update_consumer_report("battery", "A", 0)
+    d.monthly_peak_reading = MonthlyPeakReading(3500, peak_stamp, wall)
+    assert d._apply_peakshaving(3000) == 0
+    wall = datetime(*new_date, tzinfo=ZoneInfo("Europe/Brussels")).timestamp()
+    assert d._apply_peakshaving(3000) == 600
+    assert d.energy_threshold_w == 2400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "power,stamp",
+    [
+        (True, 261106190000),
+        (3500, True),
+        (None, 261106190000),
+        (3500, "bad"),
+        (3500, {}),
+    ],
+)
+async def test_bad_monthly_fields_do_not_break_power_reading(power, stamp):
+    meter = JsonHttpPowermeter("http://unused", "$.active_power_w")
+    meter.get_json = AsyncMock(
+        return_value={
+            "active_power_w": 3000,
+            "montly_power_peak_w": power,
+            "montly_power_peak_timestamp": stamp,
+        }
+    )
+    assert await meter.get_powermeter_watts() == [3000]
+    assert meter.monthly_peak_reading() is None
+
+
+@pytest.mark.asyncio
+async def test_failed_http_read_drops_previous_monthly_peak():
+    meter = JsonHttpPowermeter("http://unused", "$.active_power_w")
+    meter._monthly_peak = MonthlyPeakReading(3500, 261106190000, epoch(12))
+    meter.get_json = AsyncMock(side_effect=TimeoutError)
+    with pytest.raises(TimeoutError):
+        await meter.get_powermeter_watts()
+    assert meter.monthly_peak_reading() is None
+
+
+@pytest.mark.asyncio
+async def test_main_callback_propagates_monthly_peak_and_status_then_clears_on_failure(
+    monkeypatch,
+):
+    wall = epoch(12)
+    monkeypatch.setattr(
+        "astrameter.powermeter.json_http.time", SimpleNamespace(time=lambda: wall)
+    )
+    meter = JsonHttpPowermeter("http://unused", "$.active_power_w")
+    meter.get_json = AsyncMock(
+        return_value={
+            "active_power_w": 3000,
+            "montly_power_peak_w": 3500,
+            "montly_power_peak_timestamp": 261106190000,
+        }
+    )
+    source = ConfiguredPowermeter(
+        meter, ClientFilter([IPv4Network("127.0.0.1/32")]), False
+    )
+    device = _build_device(
+        "ct003",
+        CtSettings(quarter_shaving=True, peakshaving_threshold=2400),
+        GeneralSettings(),
+        [source],
+        "test-device",
+    )
+    device._wall_clock = lambda: wall
+    device._update_consumer_report("battery", "A", 0)
+    assert await device.before_send(("127.0.0.1", 12345)) == [3000, 0, 0]
+    assert device._apply_peakshaving(3000) == 0
+    control = ct002_to_wire(device.status_snapshot())["control"]
+    assert control["peakshaving_threshold_w"] == 2400
+    assert control["energy_threshold_w"] == 3400
+    assert control["energy_strategy"] == "instantaneous+monthly_peak"
+    meter.get_json.side_effect = TimeoutError
+    with pytest.raises(TimeoutError):
+        await device.before_send(("127.0.0.1", 12345))
+    assert device.monthly_peak_reading is None
 
 
 @pytest.mark.parametrize(
@@ -187,7 +335,8 @@ def test_meter_loss_does_not_cancel_manual_or_paused_battery(manual, active):
 
 
 @pytest.mark.asyncio
-async def test_real_udp_firmware_model_charges_shaves_and_ends_window():
+@pytest.mark.parametrize("monthly_peak", [None, 3500])
+async def test_real_udp_firmware_model_charges_shaves_and_ends_window(monthly_peak):
     from astrameter.simulator.battery import BatterySimulator
     from astrameter.simulator.eval_harness import _EvalClock, _start_ct002
 
@@ -234,11 +383,15 @@ async def test_real_udp_firmware_model_charges_shaves_and_ends_window():
             quarter_means.append(accumulated / 900)
             accumulated = 0
             window = int(now // 900)
-        demand = 3000.0 if 150 <= elapsed < 900 else 500.0
+        demand = (4000.0 if monthly_peak else 3000.0) if 150 <= elapsed < 900 else 500.0
         grid = demand - battery.current_power
         device.quarter_reading = tracker.feed(
             accumulated / 900, imported_ws / 3600000, now, now
         )
+        if monthly_peak:
+            device.monthly_peak_reading = MonthlyPeakReading(
+                monthly_peak, 261106190000, now
+            )
         previous, previous_grid = now, grid
         return [grid, 0, 0]
 
@@ -252,9 +405,12 @@ async def test_real_udp_firmware_model_charges_shaves_and_ends_window():
     finally:
         await device.stop()
     assert min(p for t, p in powers if 60 <= t < 150) < -500
-    assert max(p for t, p in powers if 700 <= t < 900) > 300
+    assert max(p for t, p in powers if 700 <= t < 900) > (100 if monthly_peak else 300)
     assert max(abs(p) for t, p in powers if 1050 <= t < 1200) < 80
-    assert max(quarter_means) < 2500
+    assert max(quarter_means) < (3500 if monthly_peak else 2500)
+    if monthly_peak:
+        assert device.energy_threshold_w == 3400
+        assert max(quarter_means) > 3000  # uses the existing monthly headroom
 
 
 @pytest.mark.asyncio

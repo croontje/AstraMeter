@@ -8,7 +8,11 @@ import aiohttp
 from aiohttp import BasicAuth
 from jsonpath_ng.ext import parse
 
-from astrameter.ct002.energy_policy import QuarterReading, QuarterTracker
+from astrameter.ct002.energy_policy import (
+    MonthlyPeakReading,
+    QuarterReading,
+    QuarterTracker,
+)
 
 from .base import as_list
 from .http_client import HttpPowermeter
@@ -59,9 +63,13 @@ class JsonHttpPowermeter(HttpPowermeter):
         self.headers = headers or {}
         self._quarter_tracker = QuarterTracker()
         self._quarter: QuarterReading | None = None
+        self._monthly_peak: MonthlyPeakReading | None = None
 
     def quarter_reading(self) -> QuarterReading | None:
         return self._quarter
+
+    def monthly_peak_reading(self) -> MonthlyPeakReading | None:
+        return self._monthly_peak
 
     def _session_options(self) -> dict[str, Any]:
         return {
@@ -72,6 +80,7 @@ class JsonHttpPowermeter(HttpPowermeter):
 
     async def get_powermeter_watts(self) -> list[float]:
         self._quarter = None
+        self._monthly_peak = None
         try:
             data = await self.get_json(self.url)
         except json.JSONDecodeError as e:
@@ -85,6 +94,26 @@ class JsonHttpPowermeter(HttpPowermeter):
         # power. Only use them with the unmodified whole-house power field.
         # Other JSON sources continue working without quarter telemetry.
         if self.json_paths == ["$.active_power_w"] and isinstance(data, dict):
+            sampled = time.time()
+            # The spelling 'montly' is part of the documented v1 API.
+            peak = data.get("montly_power_peak_w")
+            stamp = data.get("montly_power_peak_timestamp")
+            if (
+                isinstance(stamp, str)
+                and len(stamp) == 12
+                and stamp.isascii()
+                and stamp.isdigit()
+            ):
+                stamp = int(stamp)
+            if (
+                isinstance(peak, (int, float))
+                and not isinstance(peak, bool)
+                and isinstance(stamp, (int, float))
+                and not isinstance(stamp, bool)
+            ):
+                self._monthly_peak = MonthlyPeakReading(
+                    float(peak), float(stamp), sampled
+                )
             q = data.get("active_power_average_w")
             imported = data.get("total_power_import_kwh")
             if (
@@ -94,6 +123,6 @@ class JsonHttpPowermeter(HttpPowermeter):
                 and not isinstance(imported, bool)
             ):
                 self._quarter = self._quarter_tracker.feed(
-                    float(q), float(imported), time.time(), time.monotonic()
+                    float(q), float(imported), sampled, time.monotonic()
                 )
         return values

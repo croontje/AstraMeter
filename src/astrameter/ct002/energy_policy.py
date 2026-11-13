@@ -57,6 +57,33 @@ class QuarterReading:
     sample_epoch: float
 
 
+@dataclass(frozen=True)
+class MonthlyPeakReading:
+    """Official meter maximum, with local YYMMDDhhmmss and receipt epoch.
+
+    The timestamp identifies the month; it is never inferred from receipt time.
+    The HomeWizard v1 register describes completed quarters, not live power.
+    """
+
+    power_w: float
+    timestamp: float
+    sample_epoch: float
+
+
+def valid_peak_timestamp(value: float) -> bool:
+    """Validate the meter's local calendar stamp without assuming a UTC offset."""
+    if not isfinite(value) or not 0 <= value < 1e12 or value != int(value):
+        return False
+    stamp = int(value)
+    year, month = 2000 + stamp // 10000000000, stamp // 100000000 % 100
+    day, hour = stamp // 1000000 % 100, stamp // 10000 % 100
+    minute, second = stamp // 100 % 100, stamp % 100
+    if not 1 <= month <= 12 or hour > 23 or minute > 59 or second > 59:
+        return False
+    days = (31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    return 1 <= day <= days[month - 1]
+
+
 class QuarterTracker:
     """Validate a meter's quarter register against its cumulative import kWh.
 
@@ -122,6 +149,8 @@ class EnergyDecision:
     night_window: bool
     quarter_used: bool
     limited: bool
+    effective_threshold_w: float
+    monthly_peak_used: bool
 
 
 def in_charge_window(minute: int, start: int, end: int) -> bool:
@@ -141,6 +170,8 @@ def decide_energy(
     epoch: float,
     local_minute: int | None,
     quarter: QuarterReading | None = None,
+    monthly_peak: MonthlyPeakReading | None = None,
+    local_timestamp: float | None = None,
 ) -> EnergyDecision:
     """Choose an aggregate target, allowing peak discharge to preempt charging.
 
@@ -161,7 +192,26 @@ def decide_energy(
             local_minute, config.charge_start_minute, config.charge_end_minute
         )
     )
-    limit = config.threshold_w
+    threshold = config.threshold_w
+    if (
+        config.quarter_enabled
+        and monthly_peak is not None
+        and local_timestamp is not None
+    ):
+        p = monthly_peak
+        if (
+            isfinite(p.power_w)
+            and p.power_w >= 0
+            and isfinite(p.sample_epoch)
+            and p.sample_epoch >= 0
+            and 0 <= epoch - p.sample_epoch <= 3
+            and valid_peak_timestamp(p.timestamp)
+            and valid_peak_timestamp(local_timestamp)
+            and int(p.timestamp // 100000000) == int(local_timestamp // 100000000)
+            and p.timestamp <= local_timestamp
+        ):
+            threshold = max(threshold, p.power_w - 100.0)
+    limit = threshold
     quarter_used = False
     if config.quarter_enabled and quarter is not None:
         q, sampled = quarter.accumulated_w, quarter.sample_epoch
@@ -174,7 +224,7 @@ def decide_energy(
             and int(epoch // 900) == int(sampled // 900)
         ):
             remaining = 900 - epoch % 900
-            budget_ws = (config.threshold_w - q) * 900
+            budget_ws = (threshold - q) * 900
             # Count only import during sample age and response delay. Never
             # credit export or unconfirmed future battery output.
             delay = min(config.response_margin_s, remaining)
@@ -184,7 +234,7 @@ def decide_energy(
             else:
                 # No controllable time left: retain the instantaneous limit
                 # only if the remaining budget covers the response delay.
-                limit = config.threshold_w if budget_ws >= 0 else 0.0
+                limit = threshold if budget_ws >= 0 else 0.0
             quarter_used = True
 
     # Preserve energy below the limit outside the window. During the window,
@@ -206,4 +256,6 @@ def decide_energy(
         night_window=night,
         quarter_used=quarter_used,
         limited=abs(requested - target) > 1e-6,
+        effective_threshold_w=threshold,
+        monthly_peak_used=threshold > config.threshold_w,
     )

@@ -316,6 +316,8 @@ void write_device(JsonWriter &json, const DeviceStatus &device) {
   json.set("active_control", device.active_control);
   json.set("peakshaving_threshold_w", static_cast<double>(device.peakshaving_threshold), 1);
   json.set("energy_strategy", device.energy_strategy);
+  if (device.energy_threshold_w)
+    json.set("energy_threshold_w", *device.energy_threshold_w, 1);
   if (device.consumer_ttl_s.has_value())
     json.set("consumer_ttl_s", static_cast<long long>(*device.consumer_ttl_s));
   json.set("dedupe_window_s", static_cast<double>(device.dedupe_window_s), 3);

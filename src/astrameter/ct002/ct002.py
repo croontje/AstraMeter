@@ -30,7 +30,12 @@ from .balancer import (
     phase_index,
 )
 from .controls import BATTERY_POWER_MAX
-from .energy_policy import EnergyPolicyConfig, QuarterReading, decide_energy
+from .energy_policy import (
+    EnergyPolicyConfig,
+    MonthlyPeakReading,
+    QuarterReading,
+    decide_energy,
+)
 from .protocol import (
     ETX,
     RESPONSE_LABELS,
@@ -479,6 +484,7 @@ class CT002Snapshot:
     active_control: bool
     peakshaving_threshold: float
     energy_strategy: str
+    energy_threshold_w: float | None
     consumer_ttl: int | None
     dedupe_window: float
     debug_status: bool
@@ -547,7 +553,9 @@ class CT002:
         ):
             raise ValueError("night_charge_power must be between 0 and 10000 W")
         self.night_charge_timezone = night_charge_timezone
-        self._energy_zone = ZoneInfo(night_charge_timezone) if night_charge else None
+        self._energy_zone = (
+            ZoneInfo(night_charge_timezone) if night_charge or quarter_shaving else None
+        )
         self._wall_clock = wall_clock or time.time
         self._energy_config = EnergyPolicyConfig(
             night_charge_enabled=night_charge,
@@ -559,6 +567,8 @@ class CT002:
             max_discharge_w=1000000.0,
         )
         self.quarter_reading: QuarterReading | None = None
+        self.monthly_peak_reading: MonthlyPeakReading | None = None
+        self.energy_threshold_w: float | None = None
         self.energy_strategy = "instantaneous"
         self.before_send: (
             Callable[[tuple, CT002Request, str], Awaitable[list[float] | None]] | None
@@ -1079,12 +1089,19 @@ class CT002:
                 epoch=max(0.0, wall),
                 local_minute=local.hour * 60 + local.minute if local else None,
                 quarter=self.quarter_reading,
+                monthly_peak=self.monthly_peak_reading,
+                local_timestamp=float(local.strftime("%y%m%d%H%M%S"))
+                if local
+                else None,
             )
+            self.energy_threshold_w = decision.effective_threshold_w
             self.energy_strategy = (
                 "quarter" if decision.quarter_used else "instantaneous"
             )
             if decision.night_window:
                 self.energy_strategy += "+night_charge"
+            if decision.monthly_peak_used:
+                self.energy_strategy += "+monthly_peak"
             hold = (
                 decision.battery_target_w == 0
                 and all(abs(p) <= PEAKSHAVING_IDLE_BAND_W for p in steered)
@@ -1346,6 +1363,7 @@ class CT002:
             energy_strategy=self.energy_strategy
             if self.peakshaving_threshold > 0
             else "self_consumption",
+            energy_threshold_w=self.energy_threshold_w,
             consumer_ttl=self.consumer_ttl,
             dedupe_window=self.dedupe_time_window,
             debug_status=self.debug_status,

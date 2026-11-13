@@ -232,8 +232,14 @@ class CT002Component : public Component {
   void set_energy_sensors(sensor::Sensor *quarter, sensor::Sensor *imported) {
     quarter_sensor_ = quarter; import_sensor_ = imported;
   }
+  void set_monthly_peak(double power_w, double timestamp) {
+    monthly_peak_.reset();
+    if (energy_clock_ && energy_clock_->now().is_valid())
+      monthly_peak_ = MonthlyPeakReading{power_w, timestamp, static_cast<double>(energy_clock_->now().timestamp)};
+  }
 #endif
   std::string energy_strategy() const { return energy_strategy_; }
+  std::optional<double> energy_threshold() const { return energy_threshold_w_; }
   void set_max_sensor_age_ms(uint32_t v) { this->max_sensor_age_ms_ = v; }
 #ifdef USE_CT002_TEST_HOOKS
   // Enable the test-control UDP server on this port. Only compiled when the
@@ -535,9 +541,11 @@ class CT002Component : public Component {
   bool active_control_{true};
   float peakshaving_threshold_{0.0f};
   std::string energy_strategy_{"instantaneous"};
+  std::optional<double> energy_threshold_w_;
 #ifdef USE_CT002_ENERGY_POLICY
   EnergyPolicyConfig energy_config_;
   QuarterTracker quarter_tracker_;
+  std::optional<MonthlyPeakReading> monthly_peak_;
   time::RealTimeClock *energy_clock_{nullptr};
   sensor::Sensor *quarter_sensor_{nullptr};
   sensor::Sensor *import_sensor_{nullptr};

@@ -442,7 +442,7 @@ function deviceControls(
     ),
     device.control?.energy_strategy
       ? h("span", { class: "muted", "data-testid": "energy-strategy" },
-          `Energy policy: ${device.control.energy_strategy.replace(/_/g, " ").replace("+", " + ")}`)
+          `Energy policy: ${device.control.energy_strategy.replace(/_/g, " ").replace(/\+/g, " + ")}${device.control.energy_threshold_w !== undefined ? ` · Target ${device.control.energy_threshold_w} W` : ""}`)
       : null,
     // Only offered by a backend that reports the threshold, so an older
     // firmware without the setting does not show a box that cannot write.

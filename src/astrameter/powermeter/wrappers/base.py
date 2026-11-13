@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from astrameter.powermeter.base import Powermeter
 
 if TYPE_CHECKING:
-    from astrameter.ct002.energy_policy import QuarterReading
+    from astrameter.ct002.energy_policy import MonthlyPeakReading, QuarterReading
 
 
 class PowermeterWrapper(Powermeter):
@@ -22,6 +22,9 @@ class PowermeterWrapper(Powermeter):
 
     def quarter_reading(self) -> QuarterReading | None:
         return self.wrapped_powermeter.quarter_reading()
+
+    def monthly_peak_reading(self) -> MonthlyPeakReading | None:
+        return self.wrapped_powermeter.monthly_peak_reading()
 
     async def wait_for_message(self, timeout: float = 5) -> None:
         await self.wrapped_powermeter.wait_for_message(timeout)

@@ -46,6 +46,8 @@ status::DeviceStatus CT002Component::status_snapshot(double wall_now) const {
   out.active_control = this->active_control_;
   out.peakshaving_threshold = this->peakshaving_threshold_;
   out.energy_strategy = this->peakshaving_threshold_ > 0 ? this->energy_strategy_ : "self_consumption";
+  if (this->active_control_ && this->peakshaving_threshold_ > 0 && this->energy_strategy_ != "meter_unavailable_stop")
+    out.energy_threshold_w = this->energy_threshold_w_;
   out.consumer_ttl_s = this->consumer_ttl_seconds_;
   out.dedupe_window_s = static_cast<float>(this->dedupe_window_ms_) / 1000.0f;
 

@@ -476,6 +476,7 @@ function esphomeSensor(state: State): EsphomeSensor {
       sensors.push(`${IND}- platform: template\n${IND}${IND}id: quarter_import\n${IND}${IND}unit_of_measurement: W\n${IND}${IND}update_interval: never`);
       sensors.push(`${IND}- platform: template\n${IND}${IND}id: total_import\n${IND}${IND}unit_of_measurement: kWh\n${IND}${IND}update_interval: never`);
       lambdaBody += '\n                  id(quarter_import).publish_state(root["active_power_average_w"].is<float>() ? root["active_power_average_w"].as<float>() : NAN);\n                  id(total_import).publish_state(root["total_power_import_kwh"].is<float>() ? root["total_power_import_kwh"].as<float>() : NAN);';
+      lambdaBody += '\n                  id(ct002_main).set_monthly_peak(root["montly_power_peak_w"].is<double>() ? root["montly_power_peak_w"].as<double>() : NAN, root["montly_power_peak_timestamp"].is<double>() ? root["montly_power_peak_timestamp"].as<double>() : NAN);';
     }
     const headers: [string, string][] =
       esp.headersField && !isBlank(f[esp.headersField])

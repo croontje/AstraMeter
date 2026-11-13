@@ -19,14 +19,18 @@ int main(int argc, char **) {
   }
   EnergyPolicyConfig c;
   double grid, battery, epoch, q, sampled;
-  int minute, has_quarter;
+  double peak, peak_stamp, peak_sampled, local_stamp;
+  int minute, has_quarter, has_peak;
   while (std::cin >> c.threshold_w >> c.max_charge_w >> c.max_discharge_w
          >> c.charge_start_minute >> c.charge_end_minute
          >> c.night_charge_enabled >> c.quarter_enabled >> c.response_margin_s >> c.night_charge_power_w
-         >> grid >> battery >> epoch >> minute >> has_quarter >> q >> sampled) {
+         >> grid >> battery >> epoch >> minute >> has_quarter >> q >> sampled
+         >> has_peak >> peak >> peak_stamp >> peak_sampled >> local_stamp) {
     auto result = decide_energy(c, grid, battery, epoch,
         minute < 0 ? std::nullopt : std::optional<int>(minute),
-        has_quarter ? std::optional<QuarterReading>({q, sampled}) : std::nullopt);
+        has_quarter ? std::optional<QuarterReading>({q, sampled}) : std::nullopt,
+        has_peak ? std::optional<MonthlyPeakReading>({peak, peak_stamp, peak_sampled}) : std::nullopt,
+        local_stamp < 0 ? std::nullopt : std::optional<double>(local_stamp));
     if (!result) {
       std::cout << "invalid\n";
       continue;
@@ -34,6 +38,7 @@ int main(int argc, char **) {
     const auto &d = *result;
     std::cout << d.battery_target_w << ' ' << d.grid_target_w << ' '
               << d.correction_w << ' ' << d.grid_limit_w << ' '
-              << d.night_window << ' ' << d.quarter_used << ' ' << d.limited << '\n';
+              << d.night_window << ' ' << d.quarter_used << ' ' << d.limited << ' '
+              << d.effective_threshold_w << ' ' << d.monthly_peak_used << '\n';
   }
 }

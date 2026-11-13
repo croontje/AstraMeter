@@ -148,6 +148,7 @@ struct DeviceStatus {
   bool active_control{true};
   float peakshaving_threshold{0.0f};
   std::string energy_strategy{"instantaneous"};
+  std::optional<double> energy_threshold_w;
   std::optional<uint32_t> consumer_ttl_s;
   float dedupe_window_s{0.0f};
   std::optional<std::array<float, 3>> grid;
