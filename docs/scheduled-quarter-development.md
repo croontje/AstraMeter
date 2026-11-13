@@ -97,6 +97,21 @@ without any additional telemetry request. The ESP32 ESP-IDF energy-policy
 configuration compiles successfully. The actual earlier live fallback cannot
 be attributed conclusively because its raw counter samples were not logged.
 
+The fix passed [fork run 43409331087](https://github.com/croontje/AstraMeter/actions/runs/43409331087):
+171 targeted tests, ten browser tests, lint/type checks, dashboard checks and
+the isolated container startup check. The published `quarter-night` image has
+revision `549449ad8e65cf2a93a61fb854977f8d91e1733d` and digest
+`sha256:2fa1d0ce3356275e1e5ba271c5144fa353060c51af4ce385e30cd1ddc3270798`;
+anonymous registry reads verified both. The 47-scenario, five-seed steering
+evaluation is unchanged across all 17 aggregate metrics versus the saved
+pre-fix feature baseline, with no guardrail regressions. These default-policy
+simulations complement the explicit rollover regressions above.
+
+The broader Windows checks were attempted again: the component run stopped at
+two known code-generation permission failures (141 passed); the full suite
+stopped at those failures and the existing Tibber fixture line-ending failure
+(196 passed, 67 skipped). These runs do not constitute a full-suite pass.
+
 This correction is developed locally and published through the fork workflow;
 deployment on unRAID still requires separate permission.
 
